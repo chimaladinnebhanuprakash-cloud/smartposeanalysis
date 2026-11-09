@@ -1,0 +1,4 @@
+mediapipe>=1.2.0
+opencv-python>=4.8.0
+numpy>=1.26.0
+streamlit>=1.40.0

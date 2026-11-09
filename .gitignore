@@ -1,0 +1,29 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# User Data & SQLite Databases
+data/
+*.db
+*.sqlite3
+
+# Personal Streamlit credentials
+.streamlit/credentials.toml
+
+# Captured snapshots
+captures/*.jpg
+captures/*.png
+!captures/.gitkeep
+
+# Output verification
+verification_output.jpg
+
+# OS artifacts
+.DS_Store
+Thumbs.db
