@@ -142,3 +142,15 @@ The application uses:
 - Historical progress visualization.
 - Mobile application integration.
 - Support for multiple-person pose analysis.
+
+## 12. Deployment on Streamlit Cloud
+
+To deploy SmartPose directly onto Streamlit Community Cloud:
+
+1. Sign in to [share.streamlit.io](https://share.streamlit.io) with your GitHub account (`chimaladinnebhanuprakash-cloud`).
+2. Click **"New app"**.
+3. Select your repository: `chimaladinnebhanuprakash-cloud/smartposeanalysis`.
+4. Set the **Main file path** to: `app.py`.
+5. Click **"Deploy!"**.
+6. System requirements in `packages.txt` (`libgl1`, `libglib2.0-0`) and Python libraries in `requirements.txt` are automatically installed by Streamlit Cloud.
+
