@@ -432,9 +432,43 @@ elif st.session_state.nav_page == "🎯 Live Pose Analysis":
     detector = get_pose_detector()
     comparator = get_pose_comparator()
 
+    # Camera Mode Selector (Local Video Stream vs Browser Cloud Camera)
+    cam_mode = st.radio(
+        "Select Camera Input Mode:",
+        [
+            "🎥 Local Video Stream (Continuous OpenCV)",
+            "📸 Browser Camera / Snapshot (Cloud & Mobile Ready)",
+        ],
+        horizontal=True,
+        help="Use Browser Camera when hosted on Streamlit Cloud or accessing from phone/browser.",
+    )
+
     # Pose Selection Bar
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.5, 1.2, 1.2])
-    with ctrl_col1:
+    if cam_mode == "🎥 Local Video Stream (Continuous OpenCV)":
+        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2.5, 1.2, 1.2])
+        with ctrl_col1:
+            pose_options = list(PREDEFINED_POSES.keys()) + ["➕ Upload Custom Pose Image"]
+            chosen_pose = st.selectbox(
+                "Select Target Reference Pose:",
+                pose_options,
+                index=pose_options.index(st.session_state.selected_pose_name)
+                if st.session_state.selected_pose_name in pose_options
+                else 0,
+            )
+            st.session_state.selected_pose_name = chosen_pose
+
+        with ctrl_col2:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            start_camera = st.button("▶ Start Camera", type="primary", use_container_width=True)
+        with ctrl_col3:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            stop_camera = st.button("⏹ Stop Camera", use_container_width=True)
+
+        if start_camera:
+            st.session_state.camera_running = True
+        if stop_camera:
+            st.session_state.camera_running = False
+    else:
         pose_options = list(PREDEFINED_POSES.keys()) + ["➕ Upload Custom Pose Image"]
         chosen_pose = st.selectbox(
             "Select Target Reference Pose:",
@@ -444,17 +478,6 @@ elif st.session_state.nav_page == "🎯 Live Pose Analysis":
             else 0,
         )
         st.session_state.selected_pose_name = chosen_pose
-
-    with ctrl_col2:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        start_camera = st.button("▶ Start Camera", type="primary", use_container_width=True)
-    with ctrl_col3:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        stop_camera = st.button("⏹ Stop Camera", use_container_width=True)
-
-    if start_camera:
-        st.session_state.camera_running = True
-    if stop_camera:
         st.session_state.camera_running = False
 
     # Handle Custom Image Upload if selected
@@ -514,9 +537,15 @@ elif st.session_state.nav_page == "🎯 Live Pose Analysis":
             ref_placeholder.info("Select or upload a reference pose to view target.")
 
     with view_col2:
-        st.markdown("#### 📷 Live Camera Feed & Skeleton Tracking")
-        camera_placeholder = st.empty()
-        live_alert_placeholder = st.empty()
+        st.markdown("#### 📷 Camera Feed & Skeleton Tracking")
+        if cam_mode == "📸 Browser Camera / Snapshot (Cloud & Mobile Ready)":
+            browser_photo = st.camera_input("Capture pose from camera", key="browser_cam_snap")
+            camera_placeholder = st.empty()
+            live_alert_placeholder = st.empty()
+        else:
+            browser_photo = None
+            camera_placeholder = st.empty()
+            live_alert_placeholder = st.empty()
 
     st.markdown("---")
 
@@ -544,9 +573,136 @@ elif st.session_state.nav_page == "🎯 Live Pose Analysis":
         capture_status_placeholder = st.empty()
 
     # ---------------------------------------------------------
-    # Camera Stream Execution Loop
+    # Camera Execution Logic
     # ---------------------------------------------------------
-    if not st.session_state.camera_running:
+    if cam_mode == "📸 Browser Camera / Snapshot (Cloud & Mobile Ready)":
+        if browser_photo is not None:
+            file_bytes = np.asarray(bytearray(browser_photo.read()), dtype=np.uint8)
+            frame = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            if mirror_camera:
+                frame = cv2.flip(frame, 1)
+
+            h, w = frame.shape[:2]
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            detection_result = detector.process_frame(rgb_frame)
+
+            has_pose = bool(
+                detection_result
+                and detection_result.pose_landmarks
+                and len(detection_result.pose_landmarks) > 0
+            )
+
+            comparison = None
+            annotated_frame = frame.copy()
+
+            if has_pose:
+                landmarks = detection_result.pose_landmarks[0]
+                lm_dict = detector.extract_landmark_dict(landmarks, w, h)
+                live_angles = detector.extract_joint_angles(lm_dict)
+
+                if target_angles:
+                    comparison = comparator.compare_poses(live_angles, target_angles)
+                    st.session_state.latest_comparison = comparison
+                    joint_status = {k: comp.status for k, comp in comparison.joint_results.items()}
+                else:
+                    joint_status = {}
+
+                if show_skeleton_overlay:
+                    detector.draw_annotated_skeleton(
+                        annotated_frame,
+                        landmarks,
+                        joint_status=joint_status,
+                        draw_angles=show_angle_tags,
+                        angles=live_angles,
+                    )
+
+            frame_disp = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            camera_placeholder.image(frame_disp, channels="RGB", use_container_width=True)
+
+            if has_pose and comparison:
+                live_alert_placeholder.success("✅ Pose successfully analyzed from browser camera!")
+                score = comparison.overall_score
+                if score >= 90:
+                    s_class = "score-excellent"
+                elif score >= 75:
+                    s_class = "score-good"
+                elif score >= 55:
+                    s_class = "score-moderate"
+                else:
+                    s_class = "score-poor"
+
+                score_placeholder.markdown(
+                    f'<div class="score-banner {s_class}">'
+                    f'<div style="font-size: 2.2rem; font-weight: 800;">{score}%</div>'
+                    f'<div>{comparison.grade}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                progress_placeholder.progress(min(1.0, max(0.0, score / 100.0)))
+
+                sugg_html = "<div>"
+                for s in comparison.suggestions:
+                    sugg_html += f'<div class="suggestion-box">👉 {s}</div>'
+                sugg_html += "</div>"
+                suggestions_placeholder.markdown(sugg_html, unsafe_allow_html=True)
+
+                aligned_html = "**Aligned Joints (Good Form):**<br>"
+                if comparison.aligned_joints:
+                    for aj in comparison.aligned_joints:
+                        aligned_html += f'<span class="badge-aligned">✓ {aj}</span>'
+                else:
+                    aligned_html += "<em>No joints aligned yet. Adjust posture.</em>"
+                aligned_placeholder.markdown(aligned_html, unsafe_allow_html=True)
+
+                fix_html = "**Joints Needing Adjustment:**<br>"
+                if comparison.correction_joints:
+                    for cj in comparison.correction_joints:
+                        fix_html += f'<span class="badge-correction">! {cj}</span>'
+                else:
+                    fix_html += '<span class="badge-aligned">All evaluated joints aligned!</span>'
+                fix_placeholder.markdown(fix_html, unsafe_allow_html=True)
+
+                if capture_btn:
+                    cap_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures")
+                    os.makedirs(cap_dir, exist_ok=True)
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"smartpose_{ts}_{int(comparison.overall_score)}pct.jpg"
+                    filepath = os.path.join(cap_dir, filename)
+                    cv2.imwrite(filepath, annotated_frame)
+                    st.session_state.session_captures.append(
+                        {
+                            "filename": filename,
+                            "path": filepath,
+                            "score": comparison.overall_score,
+                            "pose": chosen_pose,
+                            "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                        }
+                    )
+                    capture_status_placeholder.success(f"💾 Snapshot saved: `{filename}`")
+            else:
+                live_alert_placeholder.warning("⚠️ No person detected in photo. Please ensure full body is in view.")
+                score_placeholder.markdown(
+                    '<div class="score-banner score-poor">'
+                    '<div style="font-size: 1.5rem;">0% — No Subject Detected</div>'
+                    '<div>Stand back so your body is clearly visible</div>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                progress_placeholder.progress(0.0)
+                suggestions_placeholder.info("Stand back and retake photo so your full body is visible.")
+                aligned_placeholder.markdown("**Aligned Joints:** —")
+                fix_placeholder.markdown("**Joints Needing Adjustment:** —")
+        else:
+            camera_placeholder.info("📸 Click **'Take Photo'** above using your browser camera to capture and analyze your posture.")
+            score_placeholder.markdown(
+                '<div class="score-banner score-good">Standby — Take a photo to analyze</div>',
+                unsafe_allow_html=True,
+            )
+            suggestions_placeholder.info("Form suggestions will appear after taking a photo.")
+            aligned_placeholder.markdown("**Aligned Joints (±15°):** —")
+            fix_placeholder.markdown("**Joints Needing Correction:** —")
+
+    elif not st.session_state.camera_running:
         camera_placeholder.info(
             "Camera is currently **idle**. Click **'▶ Start Camera'** above to begin live pose analysis."
         )
@@ -566,7 +722,7 @@ elif st.session_state.nav_page == "🎯 Live Pose Analysis":
                 "**Checklist:**\n"
                 "- Verify camera is plugged in.\n"
                 "- Ensure no other app (Zoom, Teams, Discord) is locking the webcam.\n"
-                "- Try changing the 'Webcam Index' in the sidebar to 1 or 2."
+                "- ☁️ **If deployed on Streamlit Cloud:** Switch to **'📸 Browser Camera / Snapshot'** mode above!"
             )
         else:
             prev_time = time.time()
